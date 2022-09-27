@@ -1,6 +1,7 @@
-package apiutil_test
+package apiutil
 
 import (
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo"
@@ -10,8 +11,6 @@ import (
 	"golang.org/x/time/rate"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-
-	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
 
 var (
@@ -36,7 +35,7 @@ var _ = Describe("Dynamic REST Mapper", func() {
 		}
 
 		lim = rate.NewLimiter(rate.Limit(5), 5)
-		mapper, err = apiutil.NewDynamicRESTMapper(cfg, apiutil.WithLimiter(lim), apiutil.WithCustomMapper(func() (meta.RESTMapper, error) {
+		mapper, err = NewDynamicRESTMapper(cfg, WithLimiter(lim), WithCustomMapper(func() (meta.RESTMapper, error) {
 			baseMapper := meta.NewDefaultRESTMapper(nil)
 			addToMapper(baseMapper)
 
@@ -130,11 +129,28 @@ var _ = Describe("Dynamic REST Mapper", func() {
 			By("ensuring that it was only refreshed once")
 			Expect(count).To(Equal(1))
 		})
+
+		It("should lazily initialize if the lazy option is used", func() {
+			var err error
+			var failedOnce bool
+			mockErr := fmt.Errorf("mock failed once")
+			mapper, err = NewDynamicRESTMapper(cfg, WithLazyDiscovery, WithCustomMapper(func() (meta.RESTMapper, error) {
+				// Make newMapper fail once
+				if !failedOnce {
+					failedOnce = true
+					return nil, mockErr
+				}
+				baseMapper := meta.NewDefaultRESTMapper(nil)
+				addToMapper(baseMapper)
+				return baseMapper, nil
+			}))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(mapper.(*dynamicRESTMapper).staticMapper).To(BeNil())
+
+			Expect(callWithTarget()).To(MatchError(mockErr))
+			Expect(callWithTarget()).To(Succeed())
+		})
 	}
-
-	PIt("should lazily initialize if the lazy option is used", func() {
-
-	})
 
 	Describe("KindFor", func() {
 		mapperTest(func() error {
